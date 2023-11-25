@@ -111,7 +111,12 @@ class ARP_Spoofer():
 		display('+', "Enabled IPv4 Routing")
 		display(':', f"Gateway IP = {Back.MAGENTA}{self.gateway}{Back.RESET}")
 		display(':', f"Total Number of Targets = {Back.MAGENTA}{len(self.targets)}{Back.RESET}")
-		gateway_scan = scan(self.gateway)[0]
+		gateway_scan = scan(self.gateway)
+		if len(gateway_scan) > 0:
+			gateway_scan = gateway_scan[0]
+		else:
+			display('-', f"Gateway {Back.MAGENTA}{self.gateway}{Back.RESET} Not Found!")
+			exit(0)
 		self.targets_ip_mac = {gateway_scan["ip"]: gateway_scan["mac"]}
 		for target in self.targets:
 			target_scan = scan(target)[0]
