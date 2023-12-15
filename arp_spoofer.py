@@ -118,9 +118,18 @@ class ARP_Spoofer():
 			display('-', f"Gateway {Back.MAGENTA}{self.gateway}{Back.RESET} Not Found!")
 			exit(0)
 		self.targets_ip_mac = {gateway_scan["ip"]: gateway_scan["mac"]}
+		targets_not_found = []
 		for target in self.targets:
-			target_scan = scan(target)[0]
+			target_scan = scan(target)
+			if target_scan == []:
+				display('-', f"Target {Back.MAGENTA}{target}{Back.RESET} not found!")
+				targets_not_found.append(target)
+				continue
+			else:
+				target_scan = target_scan[0]
 			self.targets_ip_mac[target] = target_scan["mac"]
+		for target in targets_not_found:
+			self.targets.remove(target)
 		display_clients(self.targets_ip_mac)
 		display(':', f"Destination MAC = {self.destination_mac}")
 		display(':', "Staring the Spoofing Threads")
