@@ -229,6 +229,7 @@ if __name__ == "__main__":
 	if not data.interface:
 		display('-', "Please specify an Interface")
 		display(':', f"Available Interfaces : {Back.MAGENTA}{get_if_list()}{Back.RESET}")
+		exit(0)
 	if not data.delay:
 		display('*', "No Delay specified!")
 		data.delay = 5
